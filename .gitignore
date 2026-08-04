@@ -207,7 +207,7 @@ x86/
 ### VS Code
 # VSCode settings (keep shared configuration)
 .vscode/*
-!.vscode/settings.json
+.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
@@ -258,6 +258,7 @@ Release/
 *.a
 *.su
 *.crl
+*.stm32env
 
 #TouchGFX files (in case your project has touchGFX)
 TouchGFX/generated
