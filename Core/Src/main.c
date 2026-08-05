@@ -26,6 +26,16 @@ volatile int8_t direction = 1;    // Track direction (+1 for forward, -1 for bac
 // LED port/pin arrays for easy indexing
 GPIO_TypeDef *led_ports[8] = {GPIOB, GPIOB, GPIOB, GPIOB, GPIOB, GPIOB, GPIOB, GPIOB};
 uint16_t led_pins[8] = {GPIO_PIN_0, GPIO_PIN_1, GPIO_PIN_2, GPIO_PIN_3, GPIO_PIN_4, GPIO_PIN_5, GPIO_PIN_6, GPIO_PIN_7};
+
+// TODO: Define your debounce delay based on your oscilloscope measurement
+#define DEBOUNCE_MS 50
+uint32_t last_button_press_time = 0;
+
+// Speed state: 0 = slow (1s), 1 = fast (0.5s)
+uint8_t speed_state = 0;
+
+// Current ARR value (stored for reference)
+uint32_t current_arr = 999;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -35,6 +45,8 @@ static void MX_TIM16_Init(void);
 void TIM16_IRQHandler(void);
 void turn_off_all_leds(void);
 void update_led_pattern(void);
+void handle_button_press(void);
+void change_timer_period(uint32_t new_period_ms);
 
 /* USER CODE BEGIN 0 */
 void turn_off_all_leds(void)
@@ -60,6 +72,36 @@ void update_led_pattern(void)
     else if (current_led == 0)
         direction = 1;
 }
+
+void handle_button_press(void)
+{
+    uint32_t tick = HAL_GetTick();
+
+    // Compare the elapsed time against DEBOUNCE_MS.
+    if ((tick - last_button_press_time) < DEBOUNCE_MS)
+        return;
+
+    GPIO_PinState state = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0);
+    if (state == GPIO_PIN_RESET)
+    {
+        last_button_press_time = tick; // Update time
+        speed_state ^= 1; // Toggle speed between 0 and 1
+        change_timer_period(speed_state ? 500 : 1000); // Change timer period
+    }
+}
+
+void change_timer_period(uint32_t new_period_ms)
+{
+    // Note: Timer clock is 1000 Hz (Prescaler is 7999).
+    uint32_t new_arr = new_period_ms - 1;
+
+    // Update ARR and CNT
+    TIM16->ARR = new_arr;
+    TIM16->CNT = 0;
+
+    // Store the new ARR value for reference
+    current_arr = new_arr;
+}
 /* USER CODE END 0 */
 
 /**
@@ -78,7 +120,8 @@ int main(void)
     // Ensure all LEDs are off at start
     turn_off_all_leds();
 
-    // Start TIM16 in interrupt mode
+    // Start TIM16 in interrupt mode at a 1-second period
+    change_timer_period(1000);
     HAL_TIM_Base_Start_IT(&htim16);
     /* USER CODE END 2 */
 
@@ -86,6 +129,10 @@ int main(void)
     while (1)
     {
         /* USER CODE BEGIN WHILE */
+        // Handle button press
+        handle_button_press();
+
+        // Handle timer event
         if (timer_event)
         {
             timer_event = 0;
@@ -143,23 +190,30 @@ static void MX_TIM16_Init(void)
 }
 
 /**
- * @brief GPIO Initialization – PB0 as output (LED0)
+ * @brief GPIO Initialization - PB0..PB7 as outputs, PA0 as input with pull-up
  */
 static void MX_GPIO_Init(void)
 {
+    __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
-    GPIO_InitTypeDef GPIO_InitStruct = {};
 
+    GPIO_InitTypeDef GPIO_InitStruct = {};
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 
-    // Configure all 8 pins (PB0 to PB7)
+    // Configure LEDs (PB0..PB7) as outputs
     for (uint8_t i = 0; i < 8; ++i)
     {
         GPIO_InitStruct.Pin = led_pins[i];
         HAL_GPIO_Init(led_ports[i], &GPIO_InitStruct);
     }
+
+    // Configure PA0 as input with pull-up (button active low)
+    GPIO_InitStruct.Pin = GPIO_PIN_0;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 }
 
 /**
