@@ -7,410 +7,134 @@
 #include <main.h>
 #include <stm32f0xx.h>
 #include <stdint.h>
-#include <stdlib.h>
 
-/* Private variables ---------------------------------------------------------*/
-TIM_HandleTypeDef htim16;
+/* ---------- Function prototypes ---------- */
+static void GPIO_Init(void);
+static void ADC_Init(void);
+static void write_led_byte(uint8_t pattern);
 
-/* USER CODE BEGIN PV */
-// LED port/pin arrays for easy indexing
-GPIO_TypeDef *led_ports[8] = {GPIOB, GPIOB, GPIOB, GPIOB, GPIOB, GPIOB, GPIOB, GPIOB};
-uint16_t led_pins[8] = {GPIO_PIN_0, GPIO_PIN_1, GPIO_PIN_2, GPIO_PIN_3, GPIO_PIN_4, GPIO_PIN_5, GPIO_PIN_6, GPIO_PIN_7};
-
-// Timer event flag (set by ISR)
-volatile uint8_t timer_event = 0;
-
-// Mode enumeration
-typedef enum
-{
-    MODE_1 = 0,
-    MODE_2,
-    MODE_3,
-    MODE_OFF
-} LED_Mode;
-volatile LED_Mode current_mode = MODE_OFF;
-
-// Mode 1 & 2 shared variables
-volatile uint8_t current_led = 0;
-volatile int8_t direction = 1;
-
-// Speed toggle variables
-// TODO: Define your debounce delay based on your oscilloscope measurement
-#define DEBOUNCE_MS 50
-uint32_t last_button_time[4] = {0, 0, 0, 0};
-uint8_t speed_state = 0; // 0 = slow (1s), 1 = fast (0.5s)
-
-// Mode 3 state machine
-typedef enum
-{
-    SPARKLE_IDLE = 0,
-    SPARKLE_DISPLAY,
-    SPARKLE_TURN_OFF
-} SparkleState;
-
-volatile SparkleState sparkle_state = SPARKLE_IDLE;
-volatile uint8_t sparkle_pattern = 0;
-volatile uint32_t sparkle_display_until = 0;
-volatile uint32_t sparkle_next_off_time = 0;
-volatile uint8_t sparkle_off_index = 0;
-volatile uint8_t sparkle_leds_on[8]; // Track which LEDs are currently on
-volatile uint8_t sparkle_num_leds_on = 0;
-
-// Current ARR value (stored for reference)
-uint32_t current_period_ms = 1000;
-/* USER CODE END PV */
-
-/* Private function prototypes -----------------------------------------------*/
-void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
-static void MX_TIM16_Init(void);
-void TIM16_IRQHandler(void);
-
-/* USER CODE BEGIN PFP */
-void turn_on_all_leds(void);
-void clear_all_leds(void);
-void turn_on_led(uint8_t index);
-void turn_off_led(uint8_t index);
-void change_timer_period(uint32_t new_period_ms);
-void handle_buttons(void);
-void set_mode(LED_Mode new_mode);
-void mode1_update(void);
-void mode2_update(void);
-void mode3_update(void);
-/* USER CODE END PFP */
-
-/* USER CODE BEGIN 0 */
-void turn_on_all_leds(void)
-{
-    for (uint8_t i = 0; i < 8; ++i)
-        HAL_GPIO_WritePin(led_ports[i], led_pins[i], GPIO_PIN_SET);
-}
-
-void clear_all_leds(void)
-{
-    for (uint8_t i = 0; i < 8; ++i)
-        HAL_GPIO_WritePin(led_ports[i], led_pins[i], GPIO_PIN_RESET);
-}
-
-void turn_on_led(uint8_t index)
-{
-    if (index < 8)
-        HAL_GPIO_WritePin(led_ports[index], led_pins[index], GPIO_PIN_SET);
-}
-
-void turn_off_led(uint8_t index)
-{
-    if (index < 8)
-        HAL_GPIO_WritePin(led_ports[index], led_pins[index], GPIO_PIN_RESET);
-}
-
-void change_timer_period(uint32_t new_period_ms)
-{
-    // Note: Timer clock is 1000 Hz (Prescaler is 7999).
-    uint32_t new_arr = new_period_ms - 1;
-
-    // Update ARR and CNT
-    TIM16->ARR = new_arr;
-    TIM16->CNT = 0;
-
-    // Store the new ARR value for reference
-    current_period_ms = new_period_ms;
-}
-
-void handle_buttons(void)
-{
-    uint32_t tick = HAL_GetTick();
-
-    GPIO_PinState b0 = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0);
-    GPIO_PinState b1 = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1);
-    GPIO_PinState b2 = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2);
-    GPIO_PinState b3 = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_3);
-
-    if ((b0 == GPIO_PIN_RESET) && (tick - last_button_time[0] > DEBOUNCE_MS)) // PA0: Speed Toggle
-    {
-        last_button_time[0] = tick;
-        speed_state ^= 1;                              // Toggle speed between 0 and 1
-        change_timer_period(speed_state ? 500 : 1000); // Change timer period
-    }
-    else if ((b1 == GPIO_PIN_RESET) && (tick - last_button_time[1] > DEBOUNCE_MS)) // PA1: Mode 1
-    {
-        last_button_time[1] = tick;
-        set_mode(MODE_1);
-    }
-    else if ((b2 == GPIO_PIN_RESET) && (tick - last_button_time[2] > DEBOUNCE_MS)) // PA2: Mode 2
-    {
-        last_button_time[2] = tick;
-        set_mode(MODE_2);
-    }
-    else if ((b3 == GPIO_PIN_RESET) && (tick - last_button_time[3] > DEBOUNCE_MS)) // PA3: Mode 3
-    {
-        last_button_time[3] = tick;
-        set_mode(MODE_3);
-    }
-}
-
-void set_mode(LED_Mode new_mode)
-{
-    clear_all_leds();
-
-    current_mode = new_mode;
-    current_led = 0;
-    direction = 1;
-
-    sparkle_state = SPARKLE_IDLE;
-    sparkle_pattern = 0;
-    sparkle_num_leds_on = 0;
-    sparkle_off_index = 0;
-}
-
-void mode1_update(void)
-{
-    // Running light pattern
-    // 1. Turn off all LEDs
-    // 2. Turn on the current LED
-    // 3. Update the current_led index based on direction
-    // 4. Handle direction reversal at the edges (without duplicating states)
-
-    clear_all_leds();
-    turn_on_led(current_led);
-
-    current_led = (direction > 0) ? current_led + 1 : current_led - 1;
-    if (current_led == 7)
-        direction = -1;
-    else if (current_led == 0)
-        direction = 1;
-}
-
-void mode2_update(void)
-{
-    // Inverse running light pattern (mode1)
-
-    turn_on_all_leds();
-    turn_off_led(current_led);
-
-    current_led = (direction > 0) ? current_led + 1 : current_led - 1;
-    if (current_led == 7)
-        direction = -1;
-    else if (current_led == 0)
-        direction = 1;
-}
-
-void mode3_update(void)
-{
-    // Sparkle pattern
-    // 1. Generate a random 8-bit pattern (0-255)
-    // 2. Display on the LEDs for a rand. duration between 100-1500ms
-    // 3. Turn off each LED one at a time using a random delay between 100-150ms
-    // 4. Repeat after all LEDs have turned off
-
-    uint32_t now = HAL_GetTick();
-    switch (sparkle_state)
-    {
-        // Generate a new random pattern
-        case SPARKLE_IDLE:
-        {
-            clear_all_leds();
-            sparkle_pattern = rand() % 256;
-            sparkle_num_leds_on = 0;
-
-            for (uint8_t i = 0; i < 8; ++i)
-            {
-                if (sparkle_pattern & (1 << i))
-                {
-                    turn_on_led(i);
-
-                    sparkle_leds_on[sparkle_num_leds_on] = i;
-                    sparkle_num_leds_on++;
-                }
-            }
-
-            // Hold pattern for 100-1500 ms
-            sparkle_display_until = now + (rand() % 1401 + 100);
-            sparkle_state = SPARKLE_DISPLAY;
-
-            break;
-        }
-        // Wait while pattern is displayed
-        case SPARKLE_DISPLAY:
-        {
-            if (now >= sparkle_display_until)
-            {
-                sparkle_off_index = 0;
-                sparkle_next_off_time = now + (rand() % 51 + 100); // First random turn-off delay (100-150 ms)
-                sparkle_state = SPARKLE_TURN_OFF;
-            }
-
-            break;
-        }
-        // Turn LEDs off one at a time
-        case SPARKLE_TURN_OFF:
-        {
-            if (now >= sparkle_next_off_time)
-            {
-                if (sparkle_off_index < sparkle_num_leds_on)
-                {
-                    turn_off_led(sparkle_leds_on[sparkle_off_index++]);
-
-                    // Random delay before next LED
-                    sparkle_next_off_time = now + (rand() % 51 + 100);
-                }
-                else // Finished this sparkle sequence
-                    sparkle_state = SPARKLE_IDLE;
-            }
-
-            break;
-        }
-        default: sparkle_state = SPARKLE_IDLE; break;
-    }
-}
-/* USER CODE END 0 */
-
-/**
- * @brief  The application entry point.
- * @retval int
- */
 int main(void)
 {
     HAL_Init();
-    SystemClock_Config();
+    GPIO_Init();
+    ADC_Init();
 
-    MX_GPIO_Init();
-    MX_TIM16_Init();
+    // NOTE: ADC_Init enables and starts continuous conversion
 
-    /* USER CODE BEGIN 2 */
-    // Seed random number generator
-    srand(HAL_GetTick());
-
-    clear_all_leds();
-    change_timer_period(1000);
-    HAL_TIM_Base_Start_IT(&htim16);
-    /* USER CODE END 2 */
-
+    /* Everything happens in the ISR */
     while (1)
     {
-        /* USER CODE BEGIN WHILE */
-        // Check for debounced button presses
-        handle_buttons();
-
-        // Handle scheduled timer events for Mode 1 and Mode 2
-        if (timer_event)
-        {
-            timer_event = 0;
-            switch (current_mode)
-            {
-                case MODE_1:
-                    mode1_update();
-                    break;
-                case MODE_2:
-                    mode2_update();
-                    break;
-                case MODE_3:
-                    // Mode 3 is non-blocking and driven continuously by HAL_GetTick
-                    break;
-                case MODE_OFF:
-                default:
-                    clear_all_leds();
-                    break;
-            }
-        }
-
-        // Mode 3 requires continuous polling to operate its state machine delays accurately
-        if (current_mode == MODE_3)
-            mode3_update();
-        /* USER CODE END WHILE */
     }
 }
 
-/**
- * @brief System Clock Configuration (HSI 8 MHz)
- */
-void SystemClock_Config(void)
-{
-    LL_FLASH_SetLatency(LL_FLASH_LATENCY_0);
-    while (LL_FLASH_GetLatency() != LL_FLASH_LATENCY_0)
-    {
-    }
-
-    LL_RCC_HSI_Enable();
-    while (LL_RCC_HSI_IsReady() != 1)
-    {
-    }
-
-    LL_RCC_HSI_SetCalibTrimming(16);
-    LL_RCC_SetAHBPrescaler(LL_RCC_SYSCLK_DIV_1);
-    LL_RCC_SetAPB1Prescaler(LL_RCC_APB1_DIV_1);
-    LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_HSI);
-    while (LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_HSI)
-    {
-    }
-
-    LL_SetSystemCoreClock(8000000);
-    if (HAL_InitTick(TICK_INT_PRIORITY) != HAL_OK)
-        Error_Handler();
-}
-
-/**
- * @brief TIM16 Initialization
- */
-static void MX_TIM16_Init(void)
-{
-    htim16.Instance = TIM16;
-    htim16.Init.Prescaler = 7999; // 8000 - 1
-    htim16.Init.Period = 999;
-    htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
-    htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-    htim16.Init.RepetitionCounter = 0;
-    htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-
-    if (HAL_TIM_Base_Init(&htim16) != HAL_OK)
-        Error_Handler();
-
-    NVIC_EnableIRQ(TIM16_IRQn);
-}
-
-/**
- * @brief GPIO Initialization - PB0..PB7 as outputs, PA0 as input with pull-up
- */
-static void MX_GPIO_Init(void)
+/* ---------- GPIO Configuration ---------- */
+static void GPIO_Init(void)
 {
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
 
-    GPIO_InitTypeDef GPIO_InitStruct = {};
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitTypeDef gpio_init = {};
+    gpio_init.Pull = GPIO_NOPULL;
+    gpio_init.Speed = GPIO_SPEED_FREQ_LOW;
+
+    // Configure PA5 as an analog input
+    gpio_init.Mode = GPIO_MODE_ANALOG;
+    gpio_init.Pin = GPIO_PIN_5;
+    HAL_GPIO_Init(GPIOA, &gpio_init);
 
     // Configure LEDs (PB0..PB7) as outputs
-    for (uint8_t i = 0; i < 8; ++i)
-    {
-        GPIO_InitStruct.Pin = led_pins[i];
-        HAL_GPIO_Init(led_ports[i], &GPIO_InitStruct);
-    }
+    gpio_init.Mode = GPIO_MODE_OUTPUT_PP;
+    gpio_init.Pin = GPIO_PIN_All & 0xFF;
+    HAL_GPIO_Init(GPIOB, &gpio_init);
 
-    // Buttons PA0..PA3 as inputs with pull-up (active low)
-    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3;
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_PULLUP;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    // Clear GPIOB's ODR
+    write_led_byte(0);
 }
 
-/**
- * @brief TIM16 interrupt handler - sets flags only
- */
-void TIM16_IRQHandler(void)
+/* ---------- ADC Configuration ---------- */
+static void ADC_Init(void)
 {
-    HAL_TIM_IRQHandler(&htim16);
-    timer_event = 1;
-}
+    __HAL_RCC_ADC1_CLK_ENABLE();
 
-/**
- * @brief Error handler
- */
-void Error_Handler(void)
-{
-    __disable_irq();
-    while (1)
+    // Ensure ADC is disabled, then run calibration
+    if (ADC1->CR & ADC_CR_ADEN)
+    {
+        // Used in case the ADC is enabled already
+        ADC1->CR |= ADC_CR_ADDIS;
+        while (ADC1->CR & ADC_CR_ADEN)
+        {
+        }
+    }
+
+    // Start ADC calibration and wait for it to finish
+    ADC1->CR |= ADC_CR_ADCAL;
+    while (ADC1->CR & ADC_CR_ADCAL)
     {
     }
+
+    // 12-bit resolution
+    ADC1->CFGR1 &= ~ADC_CFGR1_RES;
+
+    // Right-align
+    ADC1->CFGR1 &= ~ADC_CFGR1_ALIGN;
+
+    // Continuous conversion
+    ADC1->CFGR1 |= ADC_CFGR1_CONT;
+
+    // Software trigger
+    ADC1->CFGR1 &= ~(ADC_CFGR1_EXTSEL | ADC_CFGR1_EXTEN);
+
+    // Select channel 5 (PA5)
+    ADC1->CHSELR = ADC_CHSELR_CHSEL5;
+
+    // Configure sampling time
+    ADC1->SMPR |= ADC_SMPR_SMP_0 | ADC_SMPR_SMP_1 | ADC_SMPR_SMP_2;
+
+    // Enable end-of-conversion interrupt
+    ADC1->IER |= ADC_IER_EOCIE;
+    NVIC_SetPriority(ADC1_COMP_IRQn, 1);
+    NVIC_EnableIRQ(ADC1_COMP_IRQn);
+
+    // Enable ADC and wait for it to be ready
+    ADC1->CR |= ADC_CR_ADEN;
+    while ((ADC1->ISR & ADC_ISR_ADRDY) == 0)
+    {
+    }
+
+    // Start ADC conversion
+    ADC1->CR |= ADC_CR_ADSTART;
+}
+
+/* ---------- Interrupt Service Routine ---------- */
+void ADC1_COMP_IRQHandler(void)
+{
+    if (ADC1->ISR & ADC_ISR_EOC)
+    {
+        // Read the raw 12-bit ADC value from the data register (DR)
+        uint32_t adc_val = ADC1->DR;
+
+        // Scale the raw value proportionally to the number of LEDs (0 - 8)
+        // NOTE: Max value storeable in 12 bits is 4095
+        uint8_t leds_to_light = (uint8_t)((adc_val * 8) / 4095);
+
+        // Build the bar-graph bit pattern using bitwise shifting
+        uint8_t output_pattern = 0;
+        if (leds_to_light == 0)
+            output_pattern = 0;
+        else if (leds_to_light >= 8)
+            output_pattern = 0xFF;
+        else
+            output_pattern = (uint8_t)((1 << leds_to_light) - 1);
+
+        write_led_byte(output_pattern);
+    }
+}
+
+/* ---------- Helper: write an 8-bit pattern to PB0-PB7 ---------- */
+static void write_led_byte(uint8_t pattern)
+{
+    uint32_t odr = GPIOB->ODR;
+    odr &= ~(0xFFU);
+    odr |= pattern;
+    GPIOB->ODR = odr;
 }
