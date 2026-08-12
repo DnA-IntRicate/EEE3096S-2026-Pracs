@@ -79,9 +79,7 @@ void SystemClock_Config(void)
 
     LL_SetSystemCoreClock(8000000);
     if (HAL_InitTick(TICK_INT_PRIORITY) != HAL_OK)
-    {
         Error_Handler();
-    }
 }
 
 /**
