@@ -1,0 +1,141 @@
+// EEE3095S Practical 1A
+// Task 1: Timer Configuration and Verification
+//
+// Adam Foflonker (FFLADA001)
+// Sibahle Ntando Mndebele (MNDSIB016)
+
+/* Includes ------------------------------------------------------------------*/
+#include <main.h>
+
+/* Private includes ----------------------------------------------------------*/
+#include <stm32f0xx.h>
+#include <stdint.h>
+
+/* Private typedef -----------------------------------------------------------*/
+/* Private define ------------------------------------------------------------*/
+/* Private macro -------------------------------------------------------------*/
+
+/* Private variables ---------------------------------------------------------*/
+TIM_HandleTypeDef htim16;
+
+/* Private function prototypes -----------------------------------------------*/
+void SystemClock_Config(void);
+static void MX_GPIO_Init(void);
+static void MX_TIM16_Init(void);
+
+/* USER CODE BEGIN PFP */
+void TIM16_IRQHandler(void);
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+/* USER CODE END 0 */
+
+/**
+ * @brief  The application entry point.
+ * @retval int
+ */
+int main(void)
+{
+    HAL_Init();
+    SystemClock_Config();
+
+    MX_GPIO_Init();
+    MX_TIM16_Init();
+
+    /* USER CODE BEGIN 2 */
+    // Start TIM16 in interrupt mode
+    HAL_TIM_Base_Start_IT(&htim16);
+    /* USER CODE END 2 */
+
+    // Main loop does nothing – all work is in the ISR
+    while (1)
+    {
+    }
+}
+
+/**
+ * @brief System Clock Configuration (HSI 8 MHz)
+ */
+void SystemClock_Config(void)
+{
+    LL_FLASH_SetLatency(LL_FLASH_LATENCY_0);
+    while (LL_FLASH_GetLatency() != LL_FLASH_LATENCY_0)
+    {
+    }
+
+    LL_RCC_HSI_Enable();
+    while (LL_RCC_HSI_IsReady() != 1)
+    {
+    }
+
+    LL_RCC_HSI_SetCalibTrimming(16);
+    LL_RCC_SetAHBPrescaler(LL_RCC_SYSCLK_DIV_1);
+    LL_RCC_SetAPB1Prescaler(LL_RCC_APB1_DIV_1);
+    LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_HSI);
+    while (LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_HSI)
+    {
+    }
+
+    LL_SetSystemCoreClock(8000000);
+    if (HAL_InitTick(TICK_INT_PRIORITY) != HAL_OK)
+    {
+        Error_Handler();
+    }
+}
+
+/**
+ * @brief TIM16 Initialization
+ */
+static void MX_TIM16_Init(void)
+{
+    htim16.Instance = TIM16;
+    htim16.Init.Prescaler = 7999;
+    htim16.Init.Period = 999;
+    htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
+    htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    htim16.Init.RepetitionCounter = 0;
+    htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+
+    if (HAL_TIM_Base_Init(&htim16) != HAL_OK)
+        Error_Handler();
+
+    NVIC_EnableIRQ(TIM16_IRQn);
+}
+
+/**
+ * @brief GPIO Initialization – PB0 as output (LED0)
+ */
+static void MX_GPIO_Init(void)
+{
+    // Initialize PB0 as an output
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+
+    GPIO_InitTypeDef gpio_init = {};
+    gpio_init.Mode = GPIO_MODE_OUTPUT_PP;
+    gpio_init.Pull = GPIO_NOPULL;
+    gpio_init.Speed = GPIO_SPEED_FREQ_LOW;
+    gpio_init.Pin = GPIO_PIN_0;
+    HAL_GPIO_Init(GPIOB, &gpio_init);
+}
+
+/**
+ * @brief TIM16 interrupt handler – toggles PB0 each time
+ */
+void TIM16_IRQHandler(void)
+{
+    // Toggle PB0
+    HAL_TIM_IRQHandler(&htim16);
+    GPIOB->ODR ^= 1;
+}
+
+/**
+ * @brief Error handler
+ */
+void Error_Handler(void)
+{
+    __disable_irq();
+    while (1)
+    {
+    }
+}
