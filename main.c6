@@ -8,17 +8,18 @@
 #include <stm32f0xx.h>
 #include <stdint.h>
 
-// SysClock = 48 MHz
-// Calculation: 48 MHz / ((47 + 1) * (99 + 1)) = 10 kHz
-#define TIM16_PSC_VALUE 47
+// Calculation: 8 MHz / ((7 + 1) * (99 + 1)) = 10 kHz
+#define TIM16_PSC_VALUE 7
 #define TIM16_ARR_VALUE 99 // Counts 100 ticks
 
+void SystemClock_Config(void);
 static void GPIO_Init(void);
 static void TIM16_Init(void);
 
 int main(void)
 {
     HAL_Init();
+    SystemClock_Config();
     GPIO_Init();
     TIM16_Init();
 
@@ -28,6 +29,35 @@ int main(void)
     while (1)
     {
     }
+}
+
+/**
+  @brief System Clock Configuration (HSI 8 MHz)
+*/
+void SystemClock_Config(void)
+{
+    LL_FLASH_SetLatency(LL_FLASH_LATENCY_0);
+    while (LL_FLASH_GetLatency() != LL_FLASH_LATENCY_0)
+    {
+    }
+
+    LL_RCC_HSI_Enable();
+    while (LL_RCC_HSI_IsReady() != 1)
+    {
+    }
+
+    LL_RCC_HSI_SetCalibTrimming(16);
+    LL_RCC_SetAHBPrescaler(LL_RCC_SYSCLK_DIV_1);
+    LL_RCC_SetAPB1Prescaler(LL_RCC_APB1_DIV_1);
+    LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_HSI);
+    while (LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_HSI)
+    {
+    }
+
+    LL_SetSystemCoreClock(8000000);
+
+    if (HAL_InitTick(TICK_INT_PRIORITY) != HAL_OK)
+        Error_Handler();
 }
 
 static void GPIO_Init(void)
@@ -79,14 +109,23 @@ void TIM16_IRQHandler(void)
         TIM16->SR &= ~TIM_SR_UIF;
 
         // Implement 30% duty cycle logic
-        counter++;
-        if (counter <= 30)
+        if (counter < 30)
             GPIOB->BSRR = GPIO_BSRR_BS_4; // Set PB4 HIGH (30 ticks = 3.0 ms)
         else
             GPIOB->BSRR = GPIO_BSRR_BR_4; // Set PB4 LOW  (70 ticks = 7.0 ms)
 
         // Reset period after 100 ticks (10.0 ms)
-        if (counter >= 100)
-            counter = 0;
+        counter = (counter + 1) % 100;
+    }
+}
+
+/**
+  @brief Error handler
+*/
+void Error_Handler(void)
+{
+    __disable_irq();
+    while (1)
+    {
     }
 }
