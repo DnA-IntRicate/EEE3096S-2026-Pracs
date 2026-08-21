@@ -1,0 +1,18 @@
+Golden Measure
+==============
+
+Golden outputs:
+sqrt(         0) =          0 [PASS]
+sqrt(         1) =          1 [PASS]
+sqrt(        15) =          3 [PASS]
+sqrt(        16) =          4 [PASS]
+sqrt(      4095) =         63 [PASS]
+sqrt(     65535) =        255 [PASS]
+sqrt( 123456789) =      11111 [PASS]
+sqrt( 987654321) =      31426 [PASS]
+sqrt(4294836225) =      65535 [PASS]
+sqrt(4294967295) =      65535 [PASS]
+
+Timing:
+      1000 repetitions:      5.497 ns/call
+   1000000 repetitions:      5.006 ns/call
