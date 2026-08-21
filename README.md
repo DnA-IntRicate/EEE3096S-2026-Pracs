@@ -1,4 +1,4 @@
-# EEE3095S-2026 Practical 1
+# EEE3096S-2026 Practical 1
 
 ### By:
 
