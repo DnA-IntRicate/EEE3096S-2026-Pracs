@@ -1,24 +1,20 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * EEE3096S 2026 - Practical 1B
-  * Tasks 2 and 3: fast integer square root, TIM16 timing, optimisation flags
-  *
-  * Student 1 : <name>  <student number>
-  * Student 2 : <name>  <student number>
-  * Date      : <date>
-  *
-  * Board pins used
-  *   PC13 : scope pulse. Driven LOW for the timed section, HIGH otherwise.
-  *          Broken out on Header P1.
-  *   PB1  : pass or fail indicator. User LED 1. ON means all ten golden
-  *          values matched.
-  *
-  * Search for TODO. Every TODO is a piece of work you have to complete.
-  * Do not delete the USER CODE markers. STM32CubeIDE overwrites everything
-  * outside them whenever you regenerate from the .ioc file.
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * EEE3096S 2026 - Practical 1B
+ * Tasks 2 and 3: fast integer square root, TIM16 timing, optimization flags
+ *
+ * Student 1:  Adam Foflonker (FFLADA001)
+ * Student 2:  Sibahle Ntando Mndebele (MNDSIB016)
+ * Date:       21 Aug 2026
+ *
+ * Board pins used
+ *   PC13 : scope pulse. Driven LOW for the timed section, HIGH otherwise.
+ *          Broken out on Header P1.
+ *   PB1  : pass or fail indicator. User LED 1. ON means all ten golden
+ *          values matched.
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
@@ -29,40 +25,30 @@
 /* USER CODE END Includes */
 
 /* USER CODE BEGIN PD */
-#define PULSE_PIN    13u          /* PC13 */
-#define LED_PIN      1u           /* PB1  */
+#define PULSE_PIN  13u        /* PC13 */
+#define LED_PIN    1u         /* PB1  */
 
-#define TEST_INPUT   987654321u   /* the input named in the Task 2 question */
-#define LONG_RUN_N   20000u       /* calls in the wrap-around run           */
+#define TEST_INPUT 987654321u /* the input named in the Task 2 question */
+#define LONG_RUN_N 20000u     /* calls in the wrap-around run           */
 /* USER CODE END PD */
 
 /* USER CODE BEGIN PV */
 
-/* The ten inputs from Task 1. Do not change these. */
-static const uint32_t golden_inputs[10] = {
-    0u, 1u, 15u, 16u, 4095u, 65535u,
-    123456789u, 987654321u, 4294836225u, 4294967295u
-};
+// The ten inputs from Task 1. Do not change these.
+static const uint32_t golden_inputs[10] = {0u, 1u, 15u, 16u, 4095u, 65535u, 123456789u, 987654321u, 4294836225u, 4294967295u};
 
-/*
- * TODO 1
- * Fill this array with the ten outputs produced by YOUR Task 1 golden
- * measure. Copy them from your own PC run, not from a friend and not from
- * the practical sheet. The firmware self-test below compares against these.
- */
-static const uint32_t golden_outputs[10] = {
-    0u, 0u, 0u, 0u, 0u, 0u,
-    0u, 0u, 0u, 0u
-};
+// Golden outputs recorded from Task 1
+// The firmware self-test below compares against these.
+static const uint32_t golden_outputs[10] = {0u, 1u, 3u, 4u, 63u, 255u, 11111u, 31426u, 65535u, 65535u};
 
 /*
  * Results. Keep these volatile so the optimiser leaves them alone at -O1
  * and above. Read them in the STM32CubeIDE Live Expressions view.
  */
-volatile uint8_t  pass_all          = 0u;   /* 1 means all ten matched      */
-volatile uint32_t single_call_span  = 0u;   /* timer counts, one call       */
-volatile uint32_t long_run_span     = 0u;   /* timer counts, LONG_RUN_N     */
-volatile float    mean_us_per_call  = 0.0f; /* long run divided by N        */
+volatile uint8_t pass_all          = 0u;   /* 1 means all ten matched      */
+volatile uint32_t single_call_span = 0u;   /* timer counts, one call       */
+volatile uint32_t long_run_span    = 0u;   /* timer counts, LONG_RUN_N     */
+volatile float mean_us_per_call    = 0.0f; /* long run divided by N        */
 
 /* Sink for the return value. Stops the optimiser deleting the call. */
 static volatile uint32_t sink = 0u;
@@ -73,8 +59,8 @@ static volatile uint32_t sink = 0u;
 void SystemClock_Config(void);
 
 /* USER CODE BEGIN PFP */
-static void     gpio_init(void);
-static void     timing_timer_init(void);
+static void gpio_init(void);
+static void timing_timer_init(void);
 static uint32_t isqrt(uint32_t x);
 static uint32_t time_one_call(uint32_t x);
 static uint32_t time_n_calls(uint32_t x, uint32_t n);
@@ -83,62 +69,54 @@ static uint32_t time_n_calls(uint32_t x, uint32_t n);
 /* USER CODE BEGIN 0 */
 
 /* ---------------------------------------------------------------------------
- * Hardware initialisation
+ * Hardware initialization
  * ------------------------------------------------------------------------ */
 static void gpio_init(void)
 {
-    /*
-     * TODO 2
-     * Enable the peripheral clock for GPIOC and GPIOB.
-     *
-     * Look up the correct RCC enable register in RM0091 Section 6, Reset
-     * and Clock Control, and name the register in your report.
-     *
-     * RCC->???ENR |= ... ;
-     */
+    // Enable the peripheral clock for GPIOC and GPIOB.
+    //
+    // RCC->AHBENR is the GPIO clock enable register.
+    // TODO: Name this register in the report.
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
 
-    /*
-     * TODO 3
-     * Put PC13 and PB1 into general purpose output mode.
-     * MODER holds two bits per pin. Clear both bits first, then set the
-     * output pattern. Leave every other pin untouched.
-     */
+    // Put PC13 and PB1 into general purpose output mode.
+    GPIOC->MODER &= ~(GPIO_MODER_MODER13);
+    GPIOC->MODER |= GPIO_MODER_MODER13_0;
 
-    /*
-     * TODO 4
-     * Set the idle states: PC13 HIGH (pulse is active low) and PB1 LOW
-     * (LED off until the self-test passes).
-     * BSRR sets a pin. BRR clears a pin.
-     */
+    GPIOB->MODER &= ~(GPIO_MODER_MODER1);
+    GPIOB->MODER |= GPIO_MODER_MODER1_0;
+
+    // Set the idle states: PC13 HIGH (pulse is active low) and PB1 LOW (LED off until the self-test passes).
+    GPIOC->BSRR = (1 << PULSE_PIN);
+    GPIOB->BRR  = (1 << LED_PIN);
 }
 
 static void timing_timer_init(void)
 {
-    /*
-     * TODO 5
-     * Enable the TIM16 peripheral clock. TIM16 and the GPIO ports sit on
-     * different buses on this device. Name both buses in your report.
-     */
+    // Enable the peripheral clock for TIM16
+    //
+    // TODO: TIM16 and the GPIO ports sit on different buses on this device.
+    // Name both buses in the report.
+    // TIM16 is on APB2ENR
+    __HAL_RCC_TIM16_CLK_ENABLE();
 
-    /*
-     * TODO 6
-     * Set the prescaler so one timer count equals a time you choose and
-     * state. The division factor is PSC + 1, so:
-     *
-     *     counter clock = timer clock / (PSC + 1)
-     *
-     * Work out the timer clock from the path HSI -> AHB prescaler ->
-     * APB prescaler -> TIM16. Write the full path and every divider into
-     * your report before you pick the number.
-     *
-     * TIM16->PSC = ??? ;
-     */
+    // HSI = 8 MHz; AHB prescaler  = /1; APB2 prescaler = /1
+    // Choose a 1 ms timer tick: 8 MHz / (7999 + 1) = 1 kHz
+    // Therefore each timer count = 1 ms at PSC = 7999
+    //
+    // TODO: Work out the timer clock from the path HSI -> AHB prescaler ->
+    // APB prescaler -> TIM16. Write the full path and every divider into the report.
+    TIM16->PSC = 7999;
 
-    /*
-     * TODO 7
-     * Set ARR for a free running 16-bit counter, force the prescaler to
-     * load with an update event, then enable the counter.
-     */
+    // Free-running 16-bit counter
+    TIM16->ARR = UINT16_MAX;
+
+    // Force the prescaler to load with an update event
+    TIM16->EGR = TIM_EGR_UG;
+
+    // Enable the counter
+    TIM16->CR1 |= TIM_CR1_CEN;
 }
 
 /* ---------------------------------------------------------------------------
@@ -157,10 +135,7 @@ static void timing_timer_init(void)
  */
 static inline uint32_t square_le(uint32_t mid, uint32_t x)
 {
-    /* TODO 8: return the comparison result. */
-    (void)mid;
-    (void)x;
-    return 0u;
+    return ((uint64_t)mid * mid) <= x;
 }
 
 /*
@@ -169,14 +144,23 @@ static inline uint32_t square_le(uint32_t mid, uint32_t x)
  */
 static uint32_t isqrt(uint32_t x)
 {
-    /*
-     * TODO 9
-     * Implement a fast integer square root. A binary search over the
-     * answer range works well and is simple to reason about.
-     *
-     */
-    (void)x;
-    return 0u;
+    uint32_t low  = 0;
+    uint32_t high = 65535; // Since x is uint32, the sqrt can never exceed 65535, because: 65535^2 = 4294836225 < 2^(32)
+    uint32_t res  = 0;
+
+    while (low <= high)
+    {
+        uint32_t mid = low + (high - low) / 2;
+        if (square_le(mid, x))
+        {
+            res = mid;
+            low = mid + 1;
+        }
+        else
+            high = mid - 1;
+    }
+
+    return res;
 }
 
 /* ---------------------------------------------------------------------------
@@ -191,29 +175,25 @@ static uint32_t isqrt(uint32_t x)
  */
 static uint32_t time_one_call(uint32_t x)
 {
-    uint16_t a = 0u;
-    uint16_t b = 0u;
+    uint16_t a = 0;
+    uint16_t b = 0;
 
-    GPIOC->BRR = (1UL << PULSE_PIN);   /* PC13 low: pulse starts */
+    GPIOC->BRR = (1 << PULSE_PIN);  // PC13 low: pulse starts
 
-    /* TODO 10: capture the counter into a. Which register holds the count? */
+    a    = TIM16->CNT;              // Capture the counter into a
+    sink = isqrt(x);                // The code under test
+    b    = TIM16->CNT;              // Capture the counter into b
 
-    sink = isqrt(x);                   /* the code under test */
+    GPIOC->BSRR = (1 << PULSE_PIN); // PC13 high: pulse ends
 
-    /* TODO 11: capture the counter into b. */
-
-    GPIOC->BSRR = (1UL << PULSE_PIN);  /* PC13 high: pulse ends */
-
-    /*
-     * TODO 12
-     * Return the elapsed span. The counter wraps at its top value during
-     * long runs, so a plain b minus a is wrong once the counter rolls over.
-     * Work out an expression correct across a wrap and explain it in your
-     * report. Test your reasoning on a = 65500, b = 20.
-     */
-    (void)a;
-    (void)b;
-    return 0u;
+    // Return the elapsed span.
+    // Since TIM16 is 16-bit (and we cast to uint16), unsigned subtraction naturally wraps modulo 65536.
+    //
+    // For a = 65500; b = 20
+    // (65536 - 65500) + 20
+    // = 36 + 20
+    // = 56
+    return (uint16_t)(b - a);
 }
 
 /*
@@ -225,140 +205,127 @@ static uint32_t time_n_calls(uint32_t x, uint32_t n)
     uint16_t a = 0u;
     uint16_t b = 0u;
 
-    GPIOC->BRR = (1UL << PULSE_PIN);
+    GPIOC->BRR = (1 << PULSE_PIN); // PC13 low: pulse starts
+    a          = TIM16->CNT;       // Capture the counter into a
 
-    /* TODO 13: capture the counter into a. */
-
-    for (uint32_t i = 0u; i < n; i++)
-    {
+    for (uint32_t i = 0u; i < n; ++i)
         sink = isqrt(x);
-    }
 
-    /* TODO 14: capture the counter into b. */
+    b           = TIM16->CNT;       // Capture the counter into b
+    GPIOC->BSRR = (1 << PULSE_PIN); // PC13 high: pulse ends
 
-    GPIOC->BSRR = (1UL << PULSE_PIN);
+    // The unambiguous measurement window is 65.536 seconds:
+    // 1 tick = 1 ms; 65536 ticks = 65.536 seconds.
+    //
+    // TODO: Pick n such that the total run stays inside this window and state n in the report.
 
-    /*
-     * TODO 15
-     * Return the elapsed span using the same wrap-safe expression.
-     *
-     * Careful: a 16-bit counter measures a limited window without
-     * ambiguity. Work out that window from your prescaler, then pick n so
-     * the total run stays inside a single unambiguous window, or track the
-     * overflows yourself. State your choice in the report.
-     */
-    (void)a;
-    (void)b;
-    return 0u;
+    // Returns the elapsed span
+    return (uint16_t)(b - a);
 }
 
 /* USER CODE END 0 */
 
 /**
-  * @brief  The application entry point.
-  */
+ * @brief  The application entry point.
+ */
 int main(void)
 {
-  /* MCU Configuration -------------------------------------------------------*/
-  HAL_Init();
-  SystemClock_Config();
+    /* MCU Configuration -------------------------------------------------------*/
+    HAL_Init();
+    SystemClock_Config();
 
-  /* USER CODE BEGIN 2 */
-  gpio_init();
-  timing_timer_init();
+    /* USER CODE BEGIN 2 */
+    gpio_init();
+    timing_timer_init();
 
-  /* Self-test against the ten golden values from Task 1 */
-  pass_all = 1u;
-  for (int i = 0; i < 10; i++)
-  {
-      if (isqrt(golden_inputs[i]) != golden_outputs[i])
-      {
-          pass_all = 0u;
-          break;
-      }
-  }
-
-  /*
-   * TODO 16
-   * Drive PB1 from pass_all. LED on for a pass, off for a fail.
-   * The demonstrator checks this LED before anything else.
-   */
-
-  /* USER CODE END 2 */
-
-  /* Infinite loop */
-  while (1)
-  {
-    /* USER CODE BEGIN 3 */
-
-    /* Task 2 and Task 3: single call measurement */
-    single_call_span = time_one_call(TEST_INPUT);
-
-    /*
-     * TODO 17
-     * Task 2 wrap case: run the long measurement, then work out the mean
-     * time per call and confirm it agrees with the single call figure.
-     *
-     * Comment this out while you place the scope cursors on the single
-     * call pulse. Two pulses of very different widths on one pin make the
-     * scope trigger jump.
-     */
-    /* long_run_span    = time_n_calls(TEST_INPUT, LONG_RUN_N); */
-    /* mean_us_per_call = ??? ; */
-
-    /* Gap between measurements so the scope has a clean single pulse */
-    for (volatile int d = 0; d < 100000; d++)
+    // Self-test against the ten golden values from Task 1
+    pass_all = 1;
+    for (int i = 0; i < 10; ++i)
     {
+        if (isqrt(golden_inputs[i]) != golden_outputs[i])
+        {
+            pass_all = 0;
+            break;
+        }
     }
-    /* USER CODE END 3 */
-  }
+
+    // Drive PB1 from pass_all. LED on for a pass, off for a fail.
+    GPIOB->BSRR = pass_all ? (1 << LED_PIN) : (1 << (LED_PIN + 16));
+
+    /* USER CODE END 2 */
+
+    /* Infinite loop */
+    while (1)
+    {
+        /* USER CODE BEGIN 3 */
+
+        // Task 2 and Task 3: single call measurement.
+        // TIM16 runs at 1 kHz, so each counter tick represents 1 ms.
+        single_call_span = time_one_call(TEST_INPUT);
+
+        /*
+         * TODO 17
+         * Task 2 wrap case: run the long measurement, then work out the mean
+         * time per call and confirm it agrees with the single call figure.
+         *
+         * Since each timer tick is 1 ms:
+         *     mean_ms_per_call = span / n
+         *     mean_us_per_call = (span * 1000) / n
+         *
+         * Comment this out while you place the scope cursors on the single
+         * call pulse. Two pulses of very different widths on one pin make the
+         * scope trigger jump.
+         */
+        long_run_span    = time_n_calls(TEST_INPUT, LONG_RUN_N);
+        mean_us_per_call = (long_run_span * 1000) / LONG_RUN_N;
+
+        // Gap between measurements so the scope has a clean single pulse
+        for (volatile int d = 0; d < 100000; ++d)
+        {
+        }
+        /* USER CODE END 3 */
+    }
 }
 
 /**
-  * @brief System Clock Configuration
-  * @retval None
-  */
+ * @brief System Clock Configuration
+ * @retval None
+ */
 void SystemClock_Config(void)
 {
-  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+    RCC_OscInitTypeDef RCC_OscInitStruct = {};
+    RCC_ClkInitTypeDef RCC_ClkInitStruct = {};
 
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
-    Error_Handler();
-  }
+    RCC_OscInitStruct.OscillatorType      = RCC_OSCILLATORTYPE_HSI;
+    RCC_OscInitStruct.HSIState            = RCC_HSI_ON;
+    RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+    RCC_OscInitStruct.PLL.PLLState        = RCC_PLL_NONE;
 
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
-                              | RCC_CLOCKTYPE_PCLK1;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+        Error_Handler();
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
-  {
-    Error_Handler();
-  }
+    RCC_ClkInitStruct.ClockType      = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1;
+    RCC_ClkInitStruct.SYSCLKSource   = RCC_SYSCLKSOURCE_HSI;
+    RCC_ClkInitStruct.AHBCLKDivider  = RCC_SYSCLK_DIV1;
+    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+
+    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+        Error_Handler();
 }
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  */
+ * @brief  This function is executed in case of error occurrence.
+ */
 void Error_Handler(void)
 {
-  __disable_irq();
-  while (1)
-  {
-  }
+    __disable_irq();
+    while (1)
+    {
+    }
 }
 
-#ifdef  USE_FULL_ASSERT
-void assert_failed(uint8_t *file, uint32_t line)
-{
-}
+#ifdef USE_FULL_ASSERT
+void assert_failed(uint8_t* file, uint32_t line) { }
 #endif /* USE_FULL_ASSERT */
 
 /*
