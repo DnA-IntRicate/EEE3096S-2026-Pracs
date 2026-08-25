@@ -74,7 +74,7 @@ includeDirectories:
   - Core/Lib/**
   - Src/**
   - Core/Src/**
-  - Core/Lib/**
+  - Core/Startup/**
   - Drivers/**
   - Drivers/CMSIS/Include/**
   - Drivers/CMSIS/Device/ST/STM32F0xx/Include/**

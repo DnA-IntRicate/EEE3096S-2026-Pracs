@@ -102,7 +102,7 @@ CXX_SOURCES = \
 
 # ASM sources
 ASM_SOURCES =  \
-startup_stm32f051x8.s
+Core/Startup/startup_stm32f051c8tx.s
 
 
 #######################################

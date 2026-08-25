@@ -54,7 +54,7 @@ Drivers/STM32F0xx_HAL_Driver/Src/stm32f0xx_ll_utils.c
 #Drivers/STM32F0xx_HAL_Driver/Src/stm32f0xx_hal_uart_ex.c \
 # ASM sources
 ASM_SOURCES =  \
-startup_stm32f051x8.s
+Core/Startup/startup_stm32f051c8tx.s
 
 
 #######################################
