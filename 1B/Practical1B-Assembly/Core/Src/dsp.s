@@ -3,8 +3,8 @@
  * EEE3096S 2026 - Practical 1B, Task 4
  * Cycle-counted ADC to DAC loop with a 45 degree phase delay
  *
- * Student 1 : <name>  <student number>
- * Student 2 : <name>  <student number>
+ * Student 1: Adam Foflonker (FFLADA001)
+ * Student 2: Sibahle Ntando Mndebele (MNDSIB016)
  */
 
     .syntax unified
@@ -23,6 +23,60 @@
 
     .section .text.DSP_Loop, "ax", %progbits
 
+@ --- Timing Derivation -----------------------------------------------------
+@ TODO: Document all this in the report.
+@
+@ Input frequency: f = 1 kHz
+@ CPU frequency: fCPU = 8 MHz
+@ 1 CPU Cycle = 125 ns
+@ Period: T = 1 / 1000 = 1 ms
+@ Required phase delay: 45 degrees = 1/8 cycle; Tdelay = 1 ms / 8 = 125 us
+@ Required cycles: 125 us * 8 cycles/us = 1000 cycles
+@
+@ Loop cycle count:
+@   LDR R2, [R0]       = 2
+@   STR R2, [R1]       = 2
+@   MOVS R3, #248    = 1
+@
+@ Inner loop:
+@   SUBS R3, #1        = 1
+@   BNE delay_loop     = 3 cycles when taken
+@                      = 1 cycle when not taken
+@
+@ For 248 iterations:
+@   SUBS:
+@       248 * 1       = 248 cycles
+@   BNE taken:
+@       247 * 3       = 741 cycles
+@
+@   BNE not taken:
+@       1 * 1         = 1 cycle
+@
+@   Inner loop total:
+@       248 + 741 + 1 = 990 cycles
+@
+@ Remaining cycles:
+@   1000 - (2 + 2 + 1 + 990 + 2) = 3 cycles
+@
+@ Therefore we can insert three NOPs.
+@
+@ Complete iteration:
+@   LDR         2
+@   STR         2
+@   MOVS        1
+@   delay loop  990
+@   NOP (3)     3
+@   B loop      2
+@
+@   TOTAL       1000 cycles
+@
+@ Delay: 1000 cycles / 8 MHz = 125 us
+@ Phase: 125 us / 1 ms * 360 degrees = 45 degrees
+@ Loop/sample frequency: 1 / 125 us = 8 kHz
+@
+@ Therefore the DAC produces 8 samples per 1 kHz input cycle.
+@ ---------------------------------------------------------------------------
+
 @ ===========================================================================
 @ ENTRY POINT
 @ ===========================================================================
@@ -33,27 +87,26 @@ DSP_Loop:
 
 loop:
     @ --- SAMPLE AND OUTPUT ------------------------------------------------
-    @ TODO 1: Read the current ADC conversion from the Data Register.
-    
-    @ TODO 2: Write the value straight out to the DAC Data Register.
+    @ Read the current ADC conversion from the Data Register.
+    LDR R2, [R0]
+
+    @ Write the value straight out to the DAC Data Register.
+    STR R2, [R1]
 
     @ --- DELAY SETUP ------------------------------------------------------
-    @ TODO 3: Calculate the required cycle target for a 45-degree phase 
-    @         delay on a 1 kHz sine wave running at an 8 MHz system clock.
-    @         Load your inner loop counter and insert any NOP padding 
-    @         needed to hit your exact target.
+    @ 248 Iterations.
+    MOVS R3, #248
 
 delay_loop:
     @ --- INNER LOOP -------------------------------------------------------
-    @ TODO 4: Implement the counted delay loop.
-    @         (Remember to use flag-updating arithmetic so your branch works).
+    SUBS R3, #1
+    BNE delay_loop
+
+    NOP
+    NOP
+    NOP
 
     @ --- REPEAT -----------------------------------------------------------
-    @ TODO 5: Branch back to the start of the main 'loop'.
-    
-    @ ----------------------------------------------------------------------
-    @ NOTE: You must calculate your exact cycle budget, showing the cost 
-    @ of every instruction and loop iteration, and document it in your report.
-    @ ----------------------------------------------------------------------
+    B loop
 
     .size DSP_Loop, .-DSP_Loop
