@@ -32,7 +32,7 @@
 /* USER CODE BEGIN PD */
 
 // Pick the task to run: 4 for the phase delay, 5 for the LCD.
-#define ACTIVE_TASK       4
+#define ACTIVE_TASK 5
 
 /*
  * ADC channel for Task 4.
@@ -87,19 +87,12 @@ int main(void)
     HAL_ADC_Start(&hadc);
     HAL_DAC_Start(&hdac1, DAC_CHANNEL_1);
     DSP_Loop();
-
 #elif (ACTIVE_TASK == 5)
+    // NOTE: The LCD needs its power rail settled before the initialisation
+    //       sequence starts. Add the wait inside lcd.s, not here.
 
-    /*
-     * TODO 2
-     * Hand over to the LCD routine.
-     *
-     * LCD_Run();
-     *
-     * The LCD needs its power rail settled before the initialisation
-     * sequence starts. Add the wait inside lcd.s, not here.
-     */
-
+    // Hand over to the LCD routine.
+    LCD_Run();
 #else
 #    error "Set ACTIVE_TASK to 4 or 5"
 #endif
@@ -196,35 +189,35 @@ static void MX_DAC1_Init(void)
  */
 static void MX_GPIO_Init(void)
 {
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitTypeDef GPIO_InitStruct = {};
 
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
 
-    /* Start every LCD line low */
+    // Start every LCD line low
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14 | GPIO_PIN_15, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12 | GPIO_PIN_15, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8 | GPIO_PIN_9, GPIO_PIN_RESET);
 
-    /* PC14 RS, PC15 Enable */
+    // PC14 RS, PC15 Enable
     GPIO_InitStruct.Pin   = GPIO_PIN_14 | GPIO_PIN_15;
     GPIO_InitStruct.Mode  = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull  = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
     HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-    /* PA12 D6, PA15 D7 */
+    // PA12 D6, PA15 D7
     GPIO_InitStruct.Pin = GPIO_PIN_12 | GPIO_PIN_15;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-    /* PB8 D4, PB9 D5 */
+    // PB8 D4, PB9 D5
     GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 }
 
 /**
- * @brief  This function is executed in case of error occurrence.
+ * @brief This function is executed in case of error occurrence.
  */
 void Error_Handler(void)
 {
