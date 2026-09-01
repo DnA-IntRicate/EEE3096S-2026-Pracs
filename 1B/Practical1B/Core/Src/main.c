@@ -28,8 +28,8 @@
 #define PULSE_PIN  13u        /* PC13 */
 #define LED_PIN    1u         /* PB1  */
 
-#define TEST_INPUT 987654321u /* the input named in the Task 2 question */
-#define LONG_RUN_N 20000u     /* calls in the wrap-around run           */
+#define TEST_INPUT 987654321u   /* the input named in the Task 2 question */
+#define LONG_RUN_N 100u       /* calls in the wrap-around run           */
 /* USER CODE END PD */
 
 /* USER CODE BEGIN PV */
@@ -95,21 +95,16 @@ static void gpio_init(void)
 static void timing_timer_init(void)
 {
     // Enable the peripheral clock for TIM16
-    //
-    // TODO: TIM16 and the GPIO ports sit on different buses on this device.
-    // Name both buses in the report.
     // TIM16 is on APB2ENR
     __HAL_RCC_TIM16_CLK_ENABLE();
 
     // HSI = 8 MHz; AHB prescaler  = /1; APB2 prescaler = /1
-    // Choose a 1 ms timer tick: 8 MHz / (7999 + 1) = 1 kHz
-    // Therefore each timer count = 1 ms at PSC = 7999
-    //
-    // TODO: Work out the timer clock from the path HSI -> AHB prescaler ->
-    // APB prescaler -> TIM16. Write the full path and every divider into the report.
-    TIM16->PSC = 7999;
+    // Choose a 1 ms timer tick: 8 MHz / (7 + 1) = 1 MHz
+    // Therefore each timer count = 1 us at PSC = 7
+    TIM16->PSC = 7;
 
-    // Free-running 16-bit counter
+    // Free-running 16-bit counter.
+    // At 1 us/tick this wraps every 65.536 ms.
     TIM16->ARR = UINT16_MAX;
 
     // Force the prescaler to load with an update event
@@ -202,20 +197,20 @@ static uint32_t time_one_call(uint32_t x)
  */
 static uint32_t time_n_calls(uint32_t x, uint32_t n)
 {
-    uint16_t a = 0u;
-    uint16_t b = 0u;
+    uint16_t a = 0;
+    uint16_t b = 0;
 
     GPIOC->BRR = (1 << PULSE_PIN); // PC13 low: pulse starts
     a          = TIM16->CNT;       // Capture the counter into a
 
-    for (uint32_t i = 0u; i < n; ++i)
+    for (uint32_t i = 0; i < n; i++)
         sink = isqrt(x);
 
     b           = TIM16->CNT;       // Capture the counter into b
     GPIOC->BSRR = (1 << PULSE_PIN); // PC13 high: pulse ends
 
-    // The unambiguous measurement window is 65.536 seconds:
-    // 1 tick = 1 ms; 65536 ticks = 65.536 seconds.
+    // The unambiguous measurement window is 6.5536 seconds:
+    // 1 tick = 1 us; 65536 ticks = 6.5536 seconds.
     //
     // TODO: Pick n such that the total run stays inside this window and state n in the report.
 
@@ -240,7 +235,7 @@ int main(void)
 
     // Self-test against the ten golden values from Task 1
     pass_all = 1;
-    for (int i = 0; i < 10; ++i)
+    for (int i = 0; i < 10; i++)
     {
         if (isqrt(golden_inputs[i]) != golden_outputs[i])
         {
@@ -260,27 +255,22 @@ int main(void)
         /* USER CODE BEGIN 3 */
 
         // Task 2 and Task 3: single call measurement.
-        // TIM16 runs at 1 kHz, so each counter tick represents 1 ms.
+        // TIM16 runs at 1 MHz, so each counter tick represents 1 us.
         single_call_span = time_one_call(TEST_INPUT);
 
         /*
-         * TODO 17
          * Task 2 wrap case: run the long measurement, then work out the mean
          * time per call and confirm it agrees with the single call figure.
-         *
-         * Since each timer tick is 1 ms:
-         *     mean_ms_per_call = span / n
-         *     mean_us_per_call = (span * 1000) / n
          *
          * Comment this out while you place the scope cursors on the single
          * call pulse. Two pulses of very different widths on one pin make the
          * scope trigger jump.
          */
-        long_run_span    = time_n_calls(TEST_INPUT, LONG_RUN_N);
-        mean_us_per_call = (long_run_span * 1000) / LONG_RUN_N;
+        // long_run_span    = time_n_calls(TEST_INPUT, LONG_RUN_N);
+        // mean_us_per_call = (float)long_run_span / (float)LONG_RUN_N;
 
         // Gap between measurements so the scope has a clean single pulse
-        for (volatile int d = 0; d < 100000; ++d)
+        for (volatile int d = 0; d < 100000; d++)
         {
         }
         /* USER CODE END 3 */
