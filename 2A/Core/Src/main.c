@@ -3,9 +3,9 @@
   * EEE3096S 2026 - Practical 2A
   * Memory-Mapped I/O and Hardware SPI - building an EEPROM driver
   *
-  * Student 1 : <name>  <student number>
-  * Student 2 : <name>  <student number>
-  * Date      : <date>
+  * Student 1: Adam Foflonker (FFLADA001)
+  * Student 2: Sibahle Ntando Mndebele (MNDSIB016)
+  * Date:      26 Sep 2026
   *
   * Board : UCT Development Board, STM32F051C8
   *
@@ -28,19 +28,22 @@
 
 #include "prac2a.h"
 
-#define RUN_TASK    1
+#define RUN_TASK 1
 
 volatile uint8_t run_task = RUN_TASK;
 
 /* TODO 3.2  Once STUDENT_N1/N2 are filled in (board_config.h), work out B and A
- *           BY HAND, put your values into these two checks and uncomment
+ *           BY HAND, put your values into these two checks
+ * and uncomment
  *           them. If the build disagrees with your hand calculation, you find
- *           out now rather than at the demonstration. */
+ *           out now rather than at the
+ * demonstration. */
 /* _Static_assert(TEST_BYTE_B   == 0x00u, "group test byte B mismatch"); */
 /* _Static_assert(EEPROM_ADDR_A == 0x00u, "group address A mismatch");   */
 
 /* TODO 2.11  Once TODO 2.1 and 2.3 are done, uncomment this. It proves your
- *            divider really gives 250 kHz from the clock this build uses. */
+ *            divider really gives 250 kHz from the clock this
+ * build uses. */
 /* _Static_assert(EE_SCK_HZ_PREDICTED == 250000UL,
                   "SPI divider does not give 250 kHz from this PCLK1"); */
 
@@ -58,12 +61,12 @@ int main(void)
 
     switch (RUN_TASK)
     {
-    case 1:  task1_setup(); break;
-    case 2:  task2_setup(); break;
-    case 3:  task3_setup(); break;
-    case 4:
-    case 5:  task4_setup(); break;
-    default: task6_setup(); break;
+        case 1:  task1_setup(); break;
+        case 2:  task2_setup(); break;
+        case 3:  task3_setup(); break;
+        case 4:
+        case 5:  task4_setup(); break;
+        default: task6_setup(); break;
     }
 
     while (1)
@@ -72,12 +75,12 @@ int main(void)
 
         switch (RUN_TASK)
         {
-        case 1:  task1_loop(now); break;
-        case 2:  task2_loop(now); break;
-        case 3:  task3_loop(now); break;
-        case 4:
-        case 5:  task4_loop(now); break;
-        default: task6_loop(now); break;
+            case 1:  task1_loop(now); break;
+            case 2:  task2_loop(now); break;
+            case 3:  task3_loop(now); break;
+            case 4:
+            case 5:  task4_loop(now); break;
+            default: task6_loop(now); break;
         }
     }
 }
@@ -88,8 +91,8 @@ int main(void)
   */
 void SystemClock_Config(void)
 {
-    RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-    RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+    RCC_OscInitTypeDef RCC_OscInitStruct = {};
+    RCC_ClkInitTypeDef RCC_ClkInitStruct = {};
 
     RCC_OscInitStruct.OscillatorType      = RCC_OSCILLATORTYPE_HSI;
     RCC_OscInitStruct.HSIState            = RCC_HSI_ON;
@@ -100,8 +103,7 @@ void SystemClock_Config(void)
         Error_Handler();
     }
 
-    RCC_ClkInitStruct.ClockType      = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
-                                     | RCC_CLOCKTYPE_PCLK1;
+    RCC_ClkInitStruct.ClockType      = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1;
     RCC_ClkInitStruct.SYSCLKSource   = RCC_SYSCLKSOURCE_HSI;
     RCC_ClkInitStruct.AHBCLKDivider  = RCC_SYSCLK_DIV1;
     RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
@@ -121,7 +123,7 @@ void Error_Handler(void)
 }
 
 #ifdef USE_FULL_ASSERT
-void assert_failed(uint8_t *file, uint32_t line)
+void assert_failed(uint8_t* file, uint32_t line)
 {
     (void)file;
     (void)line;
