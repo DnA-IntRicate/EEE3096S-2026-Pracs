@@ -29,44 +29,81 @@ volatile uint32_t eeprom_timeout_count    = 0u;
  * Driver
  * ========================================================================== */
 
+// Bit A8 travels inside bit 3 of the instruction byte and A7..A0 follow as one address byte.
+static void ee_send_cmd_addr(uint8_t cmd, uint16_t address)
+{
+    if (address & 0x100u)
+        cmd |= 0x08u; // A8 in instruction bit 3
+
+    (void)spi_transfer(cmd);
+    (void)spi_transfer((uint8_t)(address & 0xFFu));
+}
+
 uint8_t eeprom_read_status(void)
 {
-    /* TODO 4.3  Select the device, send the read-status instruction, clock one
-     *           more byte to receive the status, deselect, and return it.
-     *           Be ready to explain why you have to SEND a byte in order to
-     *           RECEIVE one. */
-    return 0u;
+    // Select the device, send the read-status instruction, clock one
+    // more byte to receive the status, deselect, and return it.
+    //
+    // TODO: Be ready to explain why you have to SEND a byte in order to RECEIVE one.
+
+    uint8_t sr;
+
+    eeprom_cs_low();
+    (void)spi_transfer(EE_CMD_RDSR);
+    sr = spi_transfer(0x00u);
+    eeprom_cs_high();
+
+    return sr;
 }
 
 void eeprom_write_enable(void)
 {
-    /* TODO 4.4  Send the write-enable instruction as one complete
-     *           transaction. Check the datasheet: at what point does the write
-     *           enable latch actually get set? That decides whether this could
-     *           share a transaction with the write itself. */
+    // Send the write-enable instruction as one complete transaction.
+    //
+    // TODO: Check the datasheet: at what point does the write
+    //       enable latch actually get set? That decides whether this could
+    //       share a transaction with the write itself.
+
+    eeprom_cs_low();
+    (void)spi_transfer(EE_CMD_WREN);
+    eeprom_cs_high();   // WEL is only set on the rising edge
 }
 
 void eeprom_write_byte(uint16_t address, uint8_t value)
 {
     uint32_t start;
-
     if (address >= EEPROM_SIZE_BYTES)
-    {
         return;
-    }
 
-    /* TODO 4.5  Enable writes. Then send the write instruction, the address
-     *           (EEPROM_ADDR_BYTES bytes, most significant byte first) and the
-     *           data byte, and deselect. From the datasheet: at what moment
-     *           does the EEPROM actually start writing? */
-    (void)value;
+    // Enable writes. Then send the write instruction, the address
+    // (EEPROM_ADDR_BYTES bytes, most significant byte first) and the
+    // data byte, and deselect.
+    //
+    // TODO: From the datasheet: at what moment does the EEPROM actually start writing?
 
-    /* TODO 4.6  Wait for the write to finish by POLLING THE STATUS REGISTER.
-     *           Bound the loop with EEPROM_WRITE_TIMEOUT_MS so a missing
-     *           device cannot hang the board (count timeouts in
-     *           eeprom_timeout_count), and record how long the write took in
-     *           eeprom_write_wait_ms - your report needs that figure. */
+    // WREN must be its own transaction: the latch sets when CS goes high.
+    eeprom_write_enable();
+    eeprom_cs_low();
+    ee_send_cmd_addr(EE_CMD_WRITE, address);
+    (void)spi_transfer(value);
+    eeprom_cs_high(); // Internal write cycle start
+
+     // Wait for the write to finish by POLLING THE STATUS REGISTER.
+     // Bound the loop with EEPROM_WRITE_TIMEOUT_MS so a missing device cannot hang the board.
+     //
+     // TODO: Count timeouts in eeprom_timeout_count, and record how long
+     //       the write took in eeprom_write_wait_ms - your report needs that figure.
     start = HAL_GetTick();
+
+    // Poll RDY until the internal write cycle ends
+    while (eeprom_read_status() & EE_SR_RDY)
+    {
+        if ((uint32_t)(HAL_GetTick() - start) >= EEPROM_WRITE_TIMEOUT_MS)
+        {
+            eeprom_timeout_count++;
+            break;
+        }
+    }
 
     eeprom_write_wait_ms = (uint32_t)(HAL_GetTick() - start);
 }
@@ -74,13 +111,20 @@ void eeprom_write_byte(uint16_t address, uint8_t value)
 uint8_t eeprom_read_byte(uint16_t address)
 {
     if (address >= EEPROM_SIZE_BYTES)
-    {
         return 0u;
-    }
 
-    /* TODO 4.7  Select, send the read instruction and the address, clock one
-     *           more byte to receive the data, deselect, and return it. */
-    return 0u;
+     uint8_t v;
+
+
+    // Select, send the read instruction and the address, clock one
+    // more byte to receive the data, deselect, and return it.
+
+    eeprom_cs_low();
+    ee_send_cmd_addr(EEPROM_CMD_READ, address);
+    v = spi_transfer(0x00u); // Dummy out
+    eeprom_cs_high();
+
+    return v;
 }
 
 /* ==========================================================================
@@ -89,11 +133,10 @@ uint8_t eeprom_read_byte(uint16_t address)
 
 void leds_write_byte(uint8_t v)
 {
-    /* TODO 4.8  Show v on PB0..PB7 (LED7..LED0 = bit 7..bit 0).
-     *           Do it without disturbing PB10..PB15 on the same port - those
-     *           carry the status LEDs, CS and the SPI pins. One register lets
-     *           you set some pins and reset others in a single write. */
-    (void)v;
+    // Show v on PB0..PB7 (LED7..LED0 = bit 7..bit 0).
+    // Do it without disturbing PB10..PB15 on the same port - those
+    // carry the status LEDs, CS and the SPI pins.
+    GPIOB->BSRR = (uint32_t)v | ((uint32_t)(uint8_t)(~v) << 16);
 }
 
 /* ==========================================================================
@@ -113,15 +156,17 @@ void eeprom_read_only_path(void)
 
 void eeprom_write_verify_path(void)
 {
-    /* TODO 4.9  The complete Task 4 sequence, using eeprom_test_addr and
-     *           eeprom_test_byte:
-     *             - read the status register     -> eeprom_status_before
-     *             - write the byte (waits until the write has completed)
-     *             - read the status register     -> eeprom_status_after
-     *             - read the byte back           -> eeprom_read_value
-     *             - compare with what you wrote  -> eeprom_verify_ok
-     *             - show the byte read on the LEDs
-     *             - optional: status_leds_show(STATUS_PASS or STATUS_FAIL) */
+    // The complete Task 4 sequence, using eeprom_test_addr and eeprom_test_byte.
+    eeprom_status_before = eeprom_read_status();
+
+    eeprom_write_byte(eeprom_test_addr, eeprom_test_byte);
+
+    eeprom_status_after  = eeprom_read_status();
+    eeprom_read_value    = eeprom_read_byte(eeprom_test_addr);
+    eeprom_verify_ok     = (eeprom_read_value == eeprom_test_byte) ? 1 : 0;
+
+    leds_write_byte(eeprom_read_value);
+    status_leds_show(eeprom_verify_ok ? STATUS_PASS : STATUS_FAIL);
 }
 
 /* ==========================================================================
