@@ -30,73 +30,45 @@ volatile uint32_t eeprom_timeout_count    = 0u;
  * ========================================================================== */
 
 // Bit A8 travels inside bit 3 of the instruction byte and A7..A0 follow as one address byte.
-static void ee_send_cmd_addr(uint8_t cmd, uint16_t address)
+/* Command byte, then EEPROM_ADDR_BYTES address bytes, MSB first. */
+void ee_send_cmd_addr(uint8_t cmd, uint16_t address)
 {
-    if (address & 0x100u)
-        cmd |= 0x08u; // A8 in instruction bit 3
-
     (void)spi_transfer(cmd);
+    (void)spi_transfer((uint8_t)(address >> 8));
     (void)spi_transfer((uint8_t)(address & 0xFFu));
 }
 
 uint8_t eeprom_read_status(void)
 {
-    // Select the device, send the read-status instruction, clock one
-    // more byte to receive the status, deselect, and return it.
-    //
-    // TODO: Be ready to explain why you have to SEND a byte in order to RECEIVE one.
-
     uint8_t sr;
-
     eeprom_cs_low();
-    (void)spi_transfer(EE_CMD_RDSR);
-    sr = spi_transfer(0x00u);
+    (void)spi_transfer(EEPROM_CMD_RDSR);
+    sr = spi_transfer(0x00u);          
     eeprom_cs_high();
-
     return sr;
 }
 
 void eeprom_write_enable(void)
 {
-    // Send the write-enable instruction as one complete transaction.
-    //
-    // TODO: Check the datasheet: at what point does the write
-    //       enable latch actually get set? That decides whether this could
-    //       share a transaction with the write itself.
-
     eeprom_cs_low();
-    (void)spi_transfer(EE_CMD_WREN);
-    eeprom_cs_high();   // WEL is only set on the rising edge
+    (void)spi_transfer(EEPROM_CMD_WREN);
+    eeprom_cs_high();                  
 }
 
 void eeprom_write_byte(uint16_t address, uint8_t value)
 {
     uint32_t start;
-    if (address >= EEPROM_SIZE_BYTES)
-        return;
+    if (address >= EEPROM_SIZE_BYTES) return;
 
-    // Enable writes. Then send the write instruction, the address
-    // (EEPROM_ADDR_BYTES bytes, most significant byte first) and the
-    // data byte, and deselect.
-    //
-    // TODO: From the datasheet: at what moment does the EEPROM actually start writing?
-
-    // WREN must be its own transaction: the latch sets when CS goes high.
     eeprom_write_enable();
+
     eeprom_cs_low();
-    ee_send_cmd_addr(EE_CMD_WRITE, address);
+    ee_send_cmd_addr(EEPROM_CMD_WRITE, address);
     (void)spi_transfer(value);
-    eeprom_cs_high(); // Internal write cycle start
+    eeprom_cs_high();                  
 
-     // Wait for the write to finish by POLLING THE STATUS REGISTER.
-     // Bound the loop with EEPROM_WRITE_TIMEOUT_MS so a missing device cannot hang the board.
-     //
-     // TODO: Count timeouts in eeprom_timeout_count, and record how long
-     //       the write took in eeprom_write_wait_ms - your report needs that figure.
     start = HAL_GetTick();
-
-    // Poll RDY until the internal write cycle ends
-    while (eeprom_read_status() & EE_SR_RDY)
+    while (eeprom_read_status() & EEPROM_SR_RDY)      
     {
         if ((uint32_t)(HAL_GetTick() - start) >= EEPROM_WRITE_TIMEOUT_MS)
         {
@@ -104,7 +76,6 @@ void eeprom_write_byte(uint16_t address, uint8_t value)
             break;
         }
     }
-
     eeprom_write_wait_ms = (uint32_t)(HAL_GetTick() - start);
 }
 

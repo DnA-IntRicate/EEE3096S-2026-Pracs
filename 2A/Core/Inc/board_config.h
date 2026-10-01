@@ -33,7 +33,7 @@
  *           Read SystemClock_Config() in main.c, then follow the clock tree in
  *           the RCC chapter of RM0091 to the bus the SPI peripheral sits on.
  *           Do not assume it. */
-#define PCLK1_HZ                0UL         /* <- TODO */
+#define PCLK1_HZ                8000000UL         /* <- TODO */
 
 /* ==========================================================================
  * 2. SPI PINS - GIVEN (see README section 5, and verify by continuity)
@@ -49,8 +49,8 @@
  *           alternate-function NUMBER connects it to them? Use the STM32F051
  *           datasheet's alternate-function table for port B, and name that
  *           table in your report. */
-#define EE_SPI                  ((SPI_TypeDef *)0x00000000UL) /* <- TODO    */
-#define EE_SPI_AF               0xFFu       /* <- TODO                      */
+#define EE_SPI                  SPI2 /* <- TODO    */
+#define EE_SPI_AF               0u   /* <- TODO    */
 
 /* ==========================================================================
  * 3. SPI BAUD RATE
@@ -60,7 +60,7 @@
  *           PCLK1_HZ, using the BR field description of SPI_CR1 in RM0091.
  *           Show the arithmetic in your report. Do not tune it until the
  *           waveform "looks right". */
-#define EE_SPI_BR               0UL         /* <- TODO                      */
+#define EE_SPI_BR               4UL         /* <- TODO                      */
 #define EE_SCK_HZ_PREDICTED     (PCLK1_HZ >> (EE_SPI_BR + 1U))
 
 /* ==========================================================================
@@ -74,18 +74,19 @@
 
 /* TODO 4.1  Instruction opcodes, from the EEPROM datasheet's instruction set
  *           table. */
-#define EEPROM_CMD_WREN         0x00u       /* <- TODO */
-#define EEPROM_CMD_WRDI         0x00u       /* <- TODO */
-#define EEPROM_CMD_RDSR         0x00u       /* <- TODO */
-#define EEPROM_CMD_WRSR         0x00u       /* <- TODO */
-#define EEPROM_CMD_READ         0x00u       /* <- TODO */
-#define EEPROM_CMD_WRITE        0x00u       /* <- TODO */
+
+#define EEPROM_CMD_WREN         0x06u         /* <- TODO */
+#define EEPROM_CMD_WRDI         0x04u         /* <- TODO */
+#define EEPROM_CMD_RDSR         0x05u         /* <- TODO */
+#define EEPROM_CMD_WRSR         0x01u         /* <- TODO */
+#define EEPROM_CMD_READ         0x03u         /* <- TODO */
+#define EEPROM_CMD_WRITE        0x02u         /* <- TODO */
 
 /* TODO 4.2  Status register bit MASKS, from the datasheet's status register
  *           table. Which bit says a write is in progress - and is it 1 or 0
  *           while the device is busy? Which bit is the write enable latch? */
-#define EEPROM_SR_RDY           0x00u       /* <- TODO: busy bit mask       */
-#define EEPROM_SR_WEL           0x00u       /* <- TODO                      */
+#define EEPROM_SR_RDY           0x01u       /* <- TODO: busy bit mask       */
+#define EEPROM_SR_WEL           0x02u       /* <- TODO                      */
 
 /* Upper bound on waiting for a write. A hang guard only: completion must be
  * decided from the status register, never from elapsed time. */

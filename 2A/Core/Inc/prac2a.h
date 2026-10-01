@@ -78,6 +78,8 @@ void    eeprom_write_verify_path(void);
 void    task4_setup(void);
 void    task4_loop(uint32_t now);
 
+void    ee_send_cmd_addr(uint8_t cmd, uint16_t address);
+
 extern volatile uint16_t eeprom_test_addr;
 extern volatile uint8_t  eeprom_test_byte;
 extern volatile uint8_t  eeprom_status_before;

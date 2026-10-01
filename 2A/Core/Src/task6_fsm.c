@@ -24,47 +24,147 @@
 
 #include "prac2a.h"
 
-/* TODO 6.1  Design your states. You need enough of them to tell apart at
- *           least: idle, write preparation, write transaction, EEPROM busy /
- *           status checking, read transaction, verification, and success or
- *           failure.
- *
- *           Draw the diagram first. It must show the initial state, the
- *           condition on every transition, and the success, failure and
- *           abort paths.
- *
- *           typedef enum { ... } ee_state_t;
- */
+typedef enum {
+    EE_IDLE = 0,
+    EE_WRITE_PREP,    /* device not busy? then send WREN            */
+    EE_WRITE_TX,      /* WRITE + addr + data, CS rising edge = go   */
+    EE_BUSY_WAIT,     /* not yet time to poll: return immediately   */
+    EE_BUSY_CHECK,    /* one RDSR: RDY=1 -> wait again, 0 -> read   */
+    EE_READ_TX,
+    EE_VERIFY,
+    EE_SUCCESS,
+    EE_FAIL
+} ee_state_t;
 
-volatile uint8_t ee_state       = 0u;
-volatile uint8_t ee_last_read   = 0u;
-volatile uint8_t ee_use_fsm     = 1u;
+enum { RES_NONE = 0, RES_PASS, RES_FAIL };
+
+#define EE_POLL_MS  1u
+
+volatile uint8_t ee_state     = EE_IDLE;
+volatile uint8_t ee_last_read = 0u;
+volatile uint8_t ee_use_fsm   = 1u;
+
+static uint8_t  ee_result = RES_NONE;
+static uint16_t fsm_addr;
+static uint8_t  fsm_data;
+static uint32_t fsm_t_start;
+static uint32_t fsm_next_poll;
+
+static uint8_t ee_due(uint32_t now)      { return ((int32_t)(now - fsm_next_poll) >= 0); }
+static uint8_t ee_timed_out(uint32_t now){ return ((uint32_t)(now - fsm_t_start) >= EEPROM_WRITE_TIMEOUT_MS); }
+
+static void ee_abort(void)
+{
+    eeprom_cs_high();                                   /* deselect                */
+    while (EE_SPI->SR & SPI_SR_RXNE)                    /* drain the receive FIFO  */
+        (void)*((volatile uint8_t *)&EE_SPI->DR);
+    ee_result = RES_NONE;
+    ee_state  = EE_IDLE;
+}
 
 void update_eeprom_state_machine(uint32_t now)
 {
-    /* TODO 6.2  One step of your state machine.
-     *
-     *   - btn_start_edge (PA0) starts a transaction from idle.
-     *   - btn_abort_edge (PA3) abandons the transaction in progress and returns
-     *     to idle. Leave the SPI bus in a state the next transaction can use.
-     *   - While the EEPROM is busy writing, do NOT wait in here. Work out when
-     *     the next status check is due, remember it, and return.
-     *   - Decide that the write has finished from the status register, never
-     *     from elapsed time alone. Also decide what happens if the EEPROM never
-     *     reports ready.
-     *   - Store the byte read back in ee_last_read.
-     *   - Clear each button edge once you have acted on it. */
-    (void)now;
+    uint8_t active = (ee_state != EE_IDLE) && (ee_state != EE_SUCCESS) && (ee_state != EE_FAIL);
+
+    /* PA3 is looked at first, on every call */
+    if (btn_abort_edge)
+    {
+        btn_abort_edge = 0u;
+        btn_start_edge = 0u;
+        if (ee_state != EE_IDLE) ee_abort();
+        return;
+    }
+
+    /* PA0: starts from idle/result states, ignored (not queued) while active */
+    if (btn_start_edge)
+    {
+        btn_start_edge = 0u;
+        if (!active)
+        {
+            fsm_addr      = eeprom_test_addr;
+            fsm_data      = eeprom_test_byte;
+            fsm_t_start   = now;
+            fsm_next_poll = now;
+            ee_result     = RES_NONE;
+            ee_state      = EE_WRITE_PREP;
+        }
+        return;
+    }
+
+    switch (ee_state)
+    {
+    case EE_WRITE_PREP:
+        if (!ee_due(now)) break;
+        if (eeprom_read_status() & EEPROM_SR_RDY)       /* still busy from earlier */
+        {
+            if (ee_timed_out(now)) { ee_result = RES_FAIL; ee_state = EE_FAIL; }
+            else                     fsm_next_poll = now + EE_POLL_MS;
+        }
+        else
+        {
+            eeprom_write_enable();
+            ee_state = EE_WRITE_TX;
+        }
+        break;
+
+    case EE_WRITE_TX:
+        eeprom_cs_low();
+        ee_send_cmd_addr(EEPROM_CMD_WRITE, fsm_addr);
+        (void)spi_transfer(fsm_data);
+        eeprom_cs_high();                               /* write cycle starts      */
+        fsm_t_start   = now;
+        fsm_next_poll = now + EE_POLL_MS;
+        ee_state      = EE_BUSY_WAIT;
+        break;
+
+    case EE_BUSY_WAIT:
+        if (ee_due(now)) ee_state = EE_BUSY_CHECK;
+        break;
+
+    case EE_BUSY_CHECK:
+        if (!(eeprom_read_status() & EEPROM_SR_RDY))    /* finished per status reg */
+        {
+            eeprom_write_wait_ms = (uint32_t)(now - fsm_t_start);
+            ee_state = EE_READ_TX;
+        }
+        else if (ee_timed_out(now))                     /* never became ready      */
+        {
+            eeprom_timeout_count++;
+            ee_result = RES_FAIL;
+            ee_state  = EE_FAIL;
+        }
+        else
+        {
+            fsm_next_poll = now + EE_POLL_MS;
+            ee_state      = EE_BUSY_WAIT;
+        }
+        break;
+
+    case EE_READ_TX:
+        ee_last_read = eeprom_read_byte(fsm_addr);
+        ee_state     = EE_VERIFY;
+        break;
+
+    case EE_VERIFY:
+        if (ee_last_read == fsm_data) { ee_result = RES_PASS; ee_state = EE_SUCCESS; }
+        else                          { ee_result = RES_FAIL; ee_state = EE_FAIL;    }
+        break;
+
+    default:            /* EE_IDLE, EE_SUCCESS, EE_FAIL: hold until PA0/PA3 */
+        break;
+    }
 }
 
 void update_outputs(void)
 {
-    /* TODO 6.3  PB0..PB7 show ee_last_read (leds_write_byte). Green after a
-     *           successful verification, red after a failed one
-     *           (status_leds_show). Decide what the status LEDs should show
-     *           while a transaction is in progress, and after an abort. */
+    leds_write_byte(ee_last_read);
+    switch (ee_result)
+    {
+    case RES_PASS: status_leds_show(STATUS_PASS); break;
+    case RES_FAIL: status_leds_show(STATUS_FAIL); break;
+    default:       status_leds_show(STATUS_OFF);  break;   /* running or aborted */
+    }
 }
-
 /* ==========================================================================
  * RUN_TASK 6 - given
  *
@@ -88,6 +188,9 @@ void task6_setup(void)
     /* TODO 6.4  Your state machine starts in its idle state. Make sure the
      *           boot-time result (eeprom_verify_ok) still shows on the status
      *           LEDs, so a reset still shows green for the persistence test. */
+
+    ee_state  = EE_IDLE;
+    ee_result = eeprom_verify_ok ? RES_PASS : RES_FAIL;   /* boot result stays on the LEDs */
 }
 
 void task6_loop(uint32_t now)
